@@ -1,0 +1,9 @@
+kaggle
+dagshub
+dvc
+dvc-http
+pandas
+psycopg2-binary
+requests
+numpy
+pyspark

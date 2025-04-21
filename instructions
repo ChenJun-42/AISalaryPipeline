@@ -1,0 +1,164 @@
+# Data Zoomcamp Project: Step-by-Step Instructions
+
+This guide will walk you through setting up, running, and visualizing your end-to-end data pipeline project using Docker, Dagshub(DVC), Airflow, PySpark, Postgres, and Metabase.
+
+The reason why I did not use GCP or AWS is that I do not have money to use it since I am still a student. Even though GCP is free for 3 months, but I ran out it before I was doing project.
+
+Because the dataset the Kaggle provide was updated weekly, I used batch process.
+
+## 1. Project Overview
+
+- **Goal:** Automate the workflow from dataset download (Kaggle) → data lake(Dagshub) → data warehouse (Postgres) → PySpark transformation → dashboard visualization (Metabase).
+- **Tech Stack:** Docker, Airflow, PySpark, Postgres, Metabase, DVC, DagsHub, Kaggle.
+
+## 2. Prerequisites
+
+- **Docker & Docker Compose** installed ([Docker Desktop](https://www.docker.com/products/docker-desktop/))
+- **Kaggle API Token** ([how to get it](https://github.com/Kaggle/kaggle-api#api-credentials))
+- **DagsHub account** and repo ([DagsHub signup](https://dagshub.com/))
+- **DVC account** (optional, for DagsHub data versioning)
+- **Git** installed
+
+## 3. Project Structure
+
+```
+datazoomcamp_project2025/
+├── dags/                   # All Airflow DAGs
+│   └── datazoomcamp_pipeline.py
+├── jars/                   # JDBC drivers for PySpark
+│   └── postgresql-42.7.4.jar
+├── Dockerfile              # Custom Airflow image
+├── requirements.txt        # Python dependencies
+├── docker-compose.yaml     # Unified Docker Compose file
+├── instructions            # This instruction file
+└── .env(I removed, which need to be added)
+
+## 4. Environment Setup
+
+### 4.1. Clone the Project
+
+```sh
+git clone <your-repo-url> datazoomcamp_project2025
+cd datazoomcamp_project2025
+```
+
+### 4.2. Prepare Environment Variables
+
+Create a `.env` file in the project root with the following content (replace with your actual credentials):
+
+```
+DAGSHUB_REPO_OWNER=your_dagshub_username
+DAGSHUB_REPO_NAME=your_dagshub_repo
+DAGSHUB_USER_TOKEN=your_dagshub_token
+KAGGLE_KEY=your_kaggle_key
+KAGGLE_USERNAME=your_kaggle_username
+DVC_USERNAME=your_dvc_username
+DVC_PASSWORD=your_dvc_password
+```
+
+### 4.3. Download JDBC Driver
+
+Download the [Postgres JDBC driver](https://jdbc.postgresql.org) (e.g., `postgresql-42.7.4.jar`) and place it in the `jars/` directory.
+
+## 5. Build and Start All Services
+
+```sh
+docker-compose build
+docker-compose up -d
+```
+
+- This will build the custom Airflow image (with Java for PySpark), start Postgres, Airflow, and Metabase.
+- If you see a port conflict (e.g., Metabase 3000), either stop the process using that port or change the port in `docker-compose.yaml` (e.g., `3001:3000`).
+
+## 6. Service Access
+
+- **Airflow UI:** [http://localhost:8080](http://localhost:8080)
+- **Metabase UI:** [http://localhost:3000](http://localhost:3000) (or the port you set)
+
+## 7. Pipeline Execution
+
+### 7.1. Airflow DAG: `datazoomcamp_pipeline`
+
+- Go to Airflow UI, find the DAG named `datazoomcamp_pipeline`.
+- Trigger the DAG manually or wait for the scheduled run.
+
+#### **What happens in this DAG:**
+1. **Download dataset from Kaggle** (via BashOperator).
+2. **Push dataset to DagsHub** (via DVC and Git).
+3. **Download CSV from DagsHub** (via PythonOperator).
+4. **Load CSV into Postgres** (via PythonOperator).
+5. **PySpark transformation** (via PythonOperator):
+    - Standardizes job titles, maps experience/company size, classifies salary levels, etc.
+    - Writes the result to `salaries_transformed` table in Postgres.
+
+## 8. Inspecting Data in Postgres
+
+### 8.1. Using psql in Docker
+
+```sh
+docker-compose exec postgres-data psql -U root -d datadb
+```
+- List tables: `\dt`
+- Preview data: `SELECT * FROM salaries_transformed LIMIT 5;`
+
+### 8.2. Using Metabase
+
+- Open Metabase UI.
+- Add a new database:
+    - Type: Postgres
+    - Host: `postgres-data`
+    - Port: `5433:5432`
+    - Database: `datadb`
+    - Username: `root`
+    - Password: `root`
+- Browse tables and data visually.
+
+## 9. Building Dashboards
+
+### 9.1. Category Distribution Chart (e.g., Job Title, Experience Level, Work Mode)
+- linked info: chose PostgresSQL, Display name: postgres-data, Host:postgres-data, port:5432, Database name: datadb, Username:root, Password: root
+- In Metabase, create a new Question.
+- Choose `salaries_transformed` table.
+- Summarize by counting rows, group by `job_title`, `experience_level_full`, or `work_mode`.
+- Choose bar chart or pie chart for visualization.
+
+### 9.2. Timeline Trend Chart (e.g., Yearly Average Salary, Remote Ratio)
+
+- In Metabase, create a new Question.
+- Summarize by average of `salary_in_usd`, group by `work_year`.
+- For remote ratio:  
+  - Summarize by average of `CASE WHEN work_mode = 'Remote' THEN 1 ELSE 0 END`, group by `work_year`.
+- Choose line chart or area chart for visualization.
+
+## 10. Troubleshooting
+
+- **Port already allocated:**  
+  Change the port in `docker-compose.yaml` or stop the process using that port.
+- **PySpark Java errors:**  
+  Ensure Java is installed in the Airflow image (`openjdk-17-jre-headless`), and the JDBC driver is present in `/opt/airflow/jars/`.
+- **ClassNotFoundException: org.postgresql.Driver:**  
+  Make sure the JDBC `.jar` is in the correct directory and mounted in the container.
+- **No data in Postgres:**  
+  Check Airflow logs for task failures, and verify the CSV is downloaded and loaded correctly.
+
+## 11. Customization & Extension
+
+- Add more DAGs or tasks as needed.
+- Enhance PySpark transformations for more analytics.
+- Use Metabase SQL editor for advanced queries and custom dashboards.
+
+## 12. Stopping and Cleaning Up
+
+```sh
+docker-compose down
+```
+- To remove all containers and networks.
+
+## 13. Some Useful Commands
+
+- **Check running containers:**  
+  `docker ps`
+- **View logs for a service:**  
+  `docker-compose logs airflow-webserver`
+- **Enter Airflow container:**  
+  `docker-compose exec airflow-webserver bash`
